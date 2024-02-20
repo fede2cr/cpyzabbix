@@ -1,0 +1,57 @@
+'''
+It takes the status of zabbix hosts and turns them into neopixel
+colors.
+- Green for up and idle
+- Blue for 10% of load, depending on cpu count
+- Red if host or agent are down
+
+Change the pin that your neopixels are connect and the lenght
+of your strip of neopixels.
+
+Add a secrets.py with an api key and a url of the zabbix web
+'''
+
+import adafruit_requests
+import board
+import json
+import neopixel
+import secrets
+import socketpool
+import ssl
+import time
+import wifi
+from cpyzabbix import ZabbixAPI
+
+pixels = neopixel.NeoPixel(board.A0, 8, brightness=0.2)
+
+pool = socketpool.SocketPool(wifi.radio)
+requests = adafruit_requests.Session(pool, ssl.create_default_context())
+
+zapi = ZabbixAPI(server=secrets.url, session=requests)
+zapi.login(api_token=secrets.api_token)
+
+load_key = 'system.cpu.load[all,avg1]'
+cpunum_key = 'system.cpu.num'
+ping_key = 'zabbix[host,agent,available]'
+hostname_key = 'system.hostname'
+pixels.fill((0, 0, 0))
+
+def state_to_neopixel():
+    i=0
+    for host in zapi.host.get(output="extend"):
+        hostname = zapi.item.get(search={"key_": hostname_key}, hostids=host['hostid'], output="extend")
+        ping = zapi.item.get(search={"key_": ping_key}, hostids=host['hostid'], output="extend")
+        load = zapi.item.get(search={"key_": load_key}, hostids=host['hostid'], output="extend")
+        core_count = zapi.item.get(search={"key_": cpunum_key}, hostids=host['hostid'], output="extend")
+        print("Host: "+hostname[0]['lastvalue']+", Load:" + load[0]['lastvalue'] + ", Core count: " + core_count[0]['lastvalue'])
+        if float(load[0]['lastvalue']) < float(core_count[0]['lastvalue']) / 10: # 10% of load
+            pixels[i]=((0,10,0))
+        else:
+            pixels[i]=((0,0,10))
+        if ping[0]['lastvalue'] == '0':
+            pixels[i]=((255,0,0))
+        i = i+1
+
+while True:
+    state_to_neopixel()
+    time.sleep(60)
